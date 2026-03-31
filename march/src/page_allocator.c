@@ -3,6 +3,34 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/mman.h>
+#include <time.h>
+
+static uint64_t get_timestamp(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+}
+
+static KVPage *pa_evict_lru(PageAllocator *pa) {
+    KVPage *victim = NULL;
+    uint64_t oldest = UINT64_MAX;
+
+    for (uint32_t i = 0; i < pa->total_pages; i++) {
+        KVPage *p = &pa->pages[i];
+        if (p->state == PAGE_ACTIVE && p->ref_count == 0 && p->last_used < oldest) {
+            oldest = p->last_used;
+            victim = p;
+        }
+    }
+
+    if (victim) {
+        victim->state = PAGE_FREE;
+        pa->free_list[pa->free_top++] = victim->page_id;
+        pa->free_count++;
+    }
+
+    return victim;
+}
 
 PageAllocator *pa_create(size_t page_size, uint32_t total_pages) {
     PageAllocator *pa = calloc(1, sizeof(PageAllocator));
@@ -50,7 +78,10 @@ err:
 }
 
 KVPage *pa_alloc(PageAllocator *pa) {
-    if (pa->free_top == 0) return NULL;   /* pool full */
+    if (pa->free_top == 0) {
+        /* pool full, try LRU eviction */
+        if (!pa_evict_lru(pa)) return NULL;
+    }
 
     uint32_t id = pa->free_list[--pa->free_top];
     pa->free_count--;
@@ -59,7 +90,7 @@ KVPage *pa_alloc(PageAllocator *pa) {
     page->state     = PAGE_ACTIVE;
     page->ref_count = 1;
     page->seq_hash  = 0;
-    page->last_used = 0;
+    page->last_used = get_timestamp();
 
     return page;
 }

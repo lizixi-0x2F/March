@@ -2,6 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
+
+static uint64_t get_timestamp(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+}
 
 /* ============================================================
  * TrieMap — open-addressing HashMap, key=uint32_t token_id
@@ -168,6 +175,7 @@ uint32_t trie_collect_path(const KVTrie *trie,
 {
     TrieNode *cur   = trie->root;
     uint32_t  count = 0;
+    uint64_t  now   = get_timestamp();
     if (matched_tokens) *matched_tokens = 0;
 
     for (uint32_t i = 0; i < n; i++) {
@@ -175,8 +183,10 @@ uint32_t trie_collect_path(const KVTrie *trie,
         if (!child) break;
         cur = child;
         if (matched_tokens) (*matched_tokens)++;
-        if (cur->page && count < capacity)
+        if (cur->page && count < capacity) {
+            cur->page->last_used = now;
             out_pages[count++] = cur->page;
+        }
     }
     return count;
 }
