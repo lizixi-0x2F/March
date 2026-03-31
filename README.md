@@ -1,5 +1,9 @@
 # March - High-Performance KV Cache Sharing Library
 
+![SmolLM2 Memory Comparison](smollm2_memory_comparison.png)
+
+*500 multi-turn conversations. Same system prompt. Left: traditional storage. Right: March. The difference is prefix sharing — nothing else.*
+
 March is a **memory-efficient** KV Cache management system based on Trie structure, designed for LLM inference scenarios. It significantly **reduces memory usage** through prefix sharing, not by being faster, but by being smarter about storage.
 
 ## [Abstract — Feynman-style explanation](abstract.md)
