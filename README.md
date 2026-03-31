@@ -50,76 +50,40 @@ March is a **memory-efficient** KV Cache management system based on Trie structu
 
 ```bash
 cd march
-make lib
+make all
 ```
 
 ### Basic Usage
 
 ```python
-import ctypes
-import os
+from march.demo.demo_basic import MarchCache
 
-# Load library
-lib = ctypes.CDLL("march/libmarch.so")
-lib.march_create.restype = ctypes.c_void_p
-lib.march_create.argtypes = [ctypes.c_size_t, ctypes.c_uint32]
-
-# Create context: 256 bytes/page, max 64 pages
-ctx = lib.march_create(256, 64)
+# Create cache: 256 bytes/page, max 64 pages
+cache = MarchCache(page_size=256, max_pages=64)
 
 # Insert sequence
 tokens = [10, 20, 30]
-arr = (ctypes.c_uint32 * len(tokens))(*tokens)
-data = ctypes.create_string_buffer(b"kv-cache-data")
-lib.march_insert(ctx, arr, len(tokens), data, len(b"kv-cache-data"))
+cache.insert(tokens, "kv-data")
 
 # Query
-out_ptrs = (ctypes.c_void_p * len(tokens))()
-matched = ctypes.c_uint32(0)
-count = lib.march_query(ctx, arr, len(tokens), out_ptrs, None,
-                        len(tokens), ctypes.byref(matched))
-
-# Zero-copy read
-for i in range(count):
-    raw = (ctypes.c_char * 64).from_address(out_ptrs[i]).raw
-    print(f"Page {i}: {raw}")
-
-lib.march_destroy(ctx)
+count, matched = cache.query(tokens)
+print(f"Matched {matched} tokens, {count} pages")
 ```
 
 ## Demo Examples
 
-### 1. Basic Functionality
+### 1. Basic Usage Demo
 ```bash
 python3 march/demo/demo_basic.py
 ```
-Demonstrates basic usage of insertion, query, and prefix sharing.
+Demonstrates insertion, query, and prefix sharing with simple examples.
 
-### 2. Performance Benchmark
+### 2. Real LLM Integration Test (SmolLM2-135M) 🔥
 ```bash
-python3 march/demo/demo_bench.py
-```
-Tests insertion and query throughput, validates O(L) time complexity.
-
-### 3. HuggingFace Model Integration 🔥
-```bash
-pip install transformers torch
-python3 march/demo/demo_hf_gpt.py
-```
-Loads GPT-2 model, uses March to manage KV Cache, compares memory usage and inference performance.
-
-### 4. LLM Inference Benchmark 🔥
-```bash
-python3 march/demo/demo_llm_bench.py
-```
-Hardcore testing of three scenarios: batch inference, multi-turn dialogue, speculative sampling, showcasing March's memory and performance advantages.
-
-### 6. Real LLM Integration Test (SmolLM2-135M) 🔥
-```bash
-pip install transformers torch
+pip install transformers torch matplotlib seaborn
 python3 march/demo/demo_smollm2_memory.py
 ```
-Memory efficiency demonstration using HuggingFace's SmolLM2-135M model. Simulates 500 multi-turn conversations sharing a common system prompt, showing how March reduces memory footprint through prefix sharing.
+Memory efficiency demonstration using HuggingFace's SmolLM2-135M tokenizer. Simulates 500 multi-turn conversations sharing a common system prompt, showing how March reduces memory footprint through prefix sharing.
 
 ![SmolLM2 Memory Comparison](smollm2_memory_comparison.png)
 
