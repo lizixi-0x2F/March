@@ -2,6 +2,12 @@
 
 March is a **memory-efficient** KV Cache management system based on Trie structure, designed for LLM inference scenarios. It significantly **reduces memory usage** through prefix sharing, not by being faster, but by being smarter about storage.
 
+## [Abstract — Feynman-style explanation](abstract.md)
+
+> A plain-language walkthrough of how March works, with ASCII diagrams. Start here if you want to understand the *why* before the *how*.
+
+---
+
 ## Why March?
 
 **The Problem:** In LLM inference, multiple requests often share common prefixes (system prompts, conversation history). Traditional approaches store each sequence separately, wasting memory.
