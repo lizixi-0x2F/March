@@ -89,6 +89,12 @@ March:        ███░░░░░░░░░░░░░░░░░░░
 
 **80–97% memory reduction.** Not because we compressed anything. Because we stopped duplicating.
 
+This isn't a simulation. Here's what it looks like on a real model (SmolLM2-135M, 500 multi-turn conversations, shared system prompt):
+
+![SmolLM2 Memory Comparison](smollm2_memory_comparison.png)
+
+Each bar is a conversation. The tall ones are what you'd pay without March. The short ones are what March actually uses. The difference is just prefix sharing — nothing else.
+
 ---
 
 ## The Architecture: Three Moving Parts
