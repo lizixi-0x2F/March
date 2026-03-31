@@ -114,20 +114,6 @@ python3 march/demo/demo_llm_bench.py
 ```
 Hardcore testing of three scenarios: batch inference, multi-turn dialogue, speculative sampling, showcasing March's memory and performance advantages.
 
-### 5. Long Context Stress Test 🔥
-```bash
-pip install matplotlib seaborn
-python3 march/demo/stress_test_long_context.py
-```
-Comprehensive stress testing with baseline comparison across three scenarios:
-- **Ultra Long Context**: 100K tokens continuous conversation
-- **Massive Batch**: 1000 multi-turn conversations with shared prefixes
-- **Prefix Sharing**: 500 branches sharing 1000-token common prefix
-
-Generates performance visualization showing memory savings (80-97%), query speedup (4-12x), and insert time comparison.
-
-![Stress Test Results](stress_test_results.png)
-
 ### 6. Real LLM Integration Test (SmolLM2-135M) 🔥
 ```bash
 pip install transformers torch
