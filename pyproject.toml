@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "march-kvcache"
+version = "0.1.0"
+description = "Trie-based KV cache with prefix sharing for LLM inference"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = ["llm", "kv-cache", "prefix-sharing", "inference", "trie"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# transformers is optional — only needed for the HF adapter
+dependencies = []
+
+[project.optional-dependencies]
+hf = ["transformers>=4.40"]
+dev = ["transformers>=4.40", "torch", "pytest"]
+
+[project.urls]
+Homepage = "https://github.com/lizixi-0x2F/March"
+Repository = "https://github.com/lizixi-0x2F/March"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["march*"]
+
+[tool.setuptools.package-data]
+march = ["libmarch.so", "src/*.h"]
