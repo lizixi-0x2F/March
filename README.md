@@ -1,154 +1,112 @@
-# March - High-Performance KV Cache Sharing Library
+# March
+
+> Trie-based KV cache with prefix sharing for LLM inference.
 
 ![SmolLM2 Memory Comparison](smollm2_memory_comparison.png)
 
-*500 multi-turn conversations. Same system prompt. Left: traditional storage. Right: March. The difference is prefix sharing — nothing else.*
+*500 multi-turn conversations, same system prompt. Left: traditional storage. Right: March. The difference is prefix sharing — nothing else.*
 
-March is a **memory-efficient** KV Cache management system based on Trie structure, designed for LLM inference scenarios. It significantly **reduces memory usage** through prefix sharing, not by being faster, but by being smarter about storage.
-
-## [Abstract — Feynman-style explanation](abstract.md)
-
-> A plain-language walkthrough of how March works, with ASCII diagrams. Start here if you want to understand the *why* before the *how*.
+When multiple requests share a common prefix (system prompt, few-shot examples, conversation history), a naive cache stores N full copies. March stores one copy and shares it — the Trie deduplicates at the token level, a fixed-size page pool manages physical memory, and all reads are zero-copy pointers into an mmap'd buffer.
 
 ---
 
-## Why March?
+## Install
 
-**The Problem:** In LLM inference, multiple requests often share common prefixes (system prompts, conversation history). Traditional approaches store each sequence separately, wasting memory.
+```bash
+cd march && make all   # build libmarch.so
+pip install -e .       # or: uv pip install -e .
 
-**The Solution:** March uses a Trie structure to automatically share identical prefixes across sequences, storing each prefix only once.
-
-## Core Value Proposition
-
-- **Memory Savings**: 80-97% reduction in scenarios with prefix overlap
-- **Zero-Copy Access**: Query returns direct memory pointers without data copying
-- **Predictable Memory**: Fixed-size page pool with O(L) lookup where each step is O(1) hash
-
-## Core Features
-
-- **Prefix Sharing**: Automatically merges identical prefixes using Trie tree, storing each prefix only once
-- **Zero-Copy Query**: Returns memory pointers directly without data copying
-- **O(L) Complexity**: Both insertion and query are O(L) where L is sequence length; each hop is O(1) via internal hashmap
-- **Memory Pool Management**: Fixed-size page allocation with predictable memory usage
-- **C Implementation**: High-performance core with Python-friendly ctypes interface
-
-**Key Insight**: March trades query traversal time (O(L), one O(1) hash per token) for massive memory savings (80-97%) in prefix-heavy workloads.
-
-## Architecture
-
-**Data flow — Insert:**
+# with HuggingFace support
+pip install -e ".[hf]"
 ```
-Caller → march_insert → trie_insert → pa_alloc (get page) → memcpy kv_data into page.data
-```
-
-**Data flow — Query:**
-```
-Caller → march_query → view_build → trie_collect_path → KVView{pages[]}
-       ← out_ptrs[] (direct pointers into mmap pool, zero-copy)
-```
-
-### Core Components
-
-- **PageAllocator**: Fixed-size page allocator managing physical memory pool
-- **KVTrie**: Trie tree for token sequences, each node associated with a KV page
-- **ViewBuilder**: Builds zero-copy views during queries, returns page pointer arrays
 
 ## Quick Start
 
-### Build
+```python
+from march import MarchCache
 
-```bash
-cd march
-make all
+cache = MarchCache(page_size=4096, max_pages=256)
+
+# Insert a token sequence with its KV bytes
+cache.insert([1, 2, 3], kv_bytes)
+
+# Query — returns (page_count, matched_tokens)
+pages, matched = cache.query([1, 2, 3, 4])
+
+cache.print_stats()
+# ── March Stats ──────────────────────────
+#   uptime          : 0.3s
+#   inserts         : 1
+#   queries         : 1
+#   hit rate        : 100.0%  (1/1)
+#   token reuse     : 75.0%   (3/4 tokens served from cache)
+#   page pool       : 256 pages × 4096 B = 1024.0 KB total
+# ─────────────────────────────────────────
 ```
 
-### Basic Usage
+## HuggingFace Integration
+
+`MarchPrefixCache` wraps a HF model and intercepts prefill. On a cache hit it skips the forward pass entirely and returns the stored `past_key_values` directly.
 
 ```python
-from march.demo.demo_basic import MarchCache
+from march.hf import MarchPrefixCache
 
-# Create cache: 256 bytes/page, max 64 pages
-cache = MarchCache(page_size=256, max_pages=64)
+prefix_cache = MarchPrefixCache(model, tokenizer)
 
-# Insert sequence
-tokens = [10, 20, 30]
-cache.insert(tokens, "kv-data")
+# First call — cache miss, runs prefill and stores result
+past_kv, hit = prefix_cache.prefill(input_ids)   # hit=False
 
-# Query
-count, matched = cache.query(tokens)
-print(f"Matched {matched} tokens, {count} pages")
+# Same prefix again — served from cache, no forward pass
+past_kv, hit = prefix_cache.prefill(input_ids)   # hit=True
+
+# Pass into generate as usual
+outputs = model.generate(input_ids, past_key_values=past_kv, use_cache=True)
+
+prefix_cache.print_stats()
 ```
 
-## Demo Examples
+## How It Works
 
-### 1. Basic Usage Demo
-```bash
-python3 march/demo/demo_basic.py
 ```
-Demonstrates insertion, query, and prefix sharing with simple examples.
+insert([t0, t1, t2], kv_bytes)
 
-### 2. Real LLM Integration Test (SmolLM2-135M) 🔥
-```bash
-pip install transformers torch matplotlib seaborn
-python3 march/demo/demo_smollm2_memory.py
+  root → [t0] → [t1] → [t2] ← KVPage (mmap'd, ref-counted)
+                              ↑
+insert([t0, t1, t2, t3], ...) reuses this path, only allocates [t3]
+
+query([t0, t1, t2, t3])
+  → walks trie, each hop is O(1) via internal open-addressing hashmap
+  → returns zero-copy pointers to pages[t0..t3]
+  → overall O(L), L = sequence length
 ```
-Memory efficiency demonstration using HuggingFace's SmolLM2-135M tokenizer. Simulates 500 multi-turn conversations sharing a common system prompt, showing how March reduces memory footprint through prefix sharing.
 
-![SmolLM2 Memory Comparison](smollm2_memory_comparison.png)
+**Memory layout:**
+- Traditional: `N × L × page_size` (each sequence stored separately)
+- March: `shared_nodes × page_size` (prefixes stored once)
+- Savings: 80–97% in prefix-heavy workloads
 
-## API Reference
+## When to Use
 
-### march_create
-```c
-MarchCtx *march_create(size_t page_size, uint32_t max_pages);
+| Workload | Benefit |
+|---|---|
+| Multi-turn chat (shared system prompt) | High — same prefix every request |
+| Batch inference (shared few-shot prefix) | High — N requests, 1 copy |
+| Speculative sampling / beam search | Medium — branching prefixes |
+| Fully random sequences | None |
+
+## Architecture
+
+Three C components, one Python binding layer:
+
+- **PageAllocator** — mmap'd fixed-size pool, free-list stack, O(1) alloc/free
+- **KVTrie** — token-keyed prefix trie, per-node open-addressing hashmap
+- **ViewBuilder** — zero-copy path collection, root-to-leaf pointer arrays
+
 ```
-Creates context with specified page size and maximum page count.
-
-### march_insert
-```c
-int march_insert(MarchCtx *ctx, const uint32_t *token_ids, uint32_t n,
-                 const void *kv_data, size_t kv_len);
+march_insert → KVTrie → PageAllocator (alloc page, memcpy kv_data)
+march_query  → KVTrie → ViewBuilder   → out_ptrs[] (zero-copy into pool)
 ```
-Inserts token sequence and its KV data. Returns 1 on success, 0 on failure (memory pool full).
-
-### march_query
-```c
-uint32_t march_query(MarchCtx *ctx, const uint32_t *token_ids, uint32_t n,
-                     void **out_ptrs, uint32_t *out_page_ids,
-                     uint32_t capacity, uint32_t *matched_tokens);
-```
-Queries sequence, returns number of matched pages. `out_ptrs` is zero-copy pointer array.
-
-### march_destroy
-```c
-void march_destroy(MarchCtx *ctx);
-```
-Destroys context and frees all memory.
-
-## Performance Metrics
-
-Test results on M3 Mac:
-
-| Metric | Value | Notes |
-|--------|-------|-------|
-| Memory Savings | 80-97% | In prefix-sharing scenarios |
-| Insert Throughput | ~50,000 ops/s | Comparable to baseline |
-| Query Throughput | ~200,000 ops/s | O(L) complexity |
-
-**Memory comparison:**
-- Traditional: N × L × page_size (each sequence stored separately)
-- March: shared_nodes × page_size (prefixes stored once)
-
-**When March wins:** Multi-turn conversations, batch inference with shared prompts, speculative sampling
-**When dict wins:** Random sequences with no prefix overlap
-
-## Use Cases
-
-- **LLM Inference Service**: Reuse historical KV Cache in multi-turn conversations
-- **Batch Inference**: Batch requests sharing prompt prefixes
-- **Speculative Sampling**: Multiple candidate sequences sharing prefix KV
-- **Tree Search**: KV management in Beam Search
 
 ## License
 
-MIT License
+MIT
