@@ -39,11 +39,18 @@ Each node's children live in an open-addressing hashmap with Fibonacci hashing, 
 ## Install
 
 ```bash
-cd march && make all          # build libmarch.so
-uv pip install -e ".[hf]"    # or: pip install -e ".[hf]"
+# 从 GitHub 一条命令安装（自动编译 C 核心）
+uv pip install git+https://github.com/lizixi-0x2F/March
+
+# 带 HuggingFace 集成
+uv pip install "march[hf] @ git+https://github.com/lizixi-0x2F/March"
+
+# 本地开发
+git clone https://github.com/lizixi-0x2F/March && cd March
+uv pip install -e ".[hf]"
 ```
 
-Requires `gcc`, Python ≥ 3.10. HuggingFace integration requires `transformers ≥ 4.40` and `torch`.
+需要：`gcc`，Python ≥ 3.10。HF 集成额外需要 `transformers ≥ 4.40` 和 `torch`。
 
 ---
 
