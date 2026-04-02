@@ -1,8 +1,8 @@
 """
 setup.py — build hook that compiles libmarch.so via make before install.
 
-uv pip install git+https://github.com/lizixi-0x2F/March
-pip install git+https://github.com/lizixi-0x2F/March
+    uv pip install git+https://github.com/lizixi-0x2F/March
+    pip install git+https://github.com/lizixi-0x2F/March
 """
 import os
 import subprocess

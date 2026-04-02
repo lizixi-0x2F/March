@@ -39,18 +39,18 @@ Each node's children live in an open-addressing hashmap with Fibonacci hashing, 
 ## Install
 
 ```bash
-# 从 GitHub 一条命令安装（自动编译 C 核心）
+# one-liner install from GitHub (compiles C core automatically)
 uv pip install git+https://github.com/lizixi-0x2F/March
 
-# 带 HuggingFace 集成
+# with HuggingFace integration
 uv pip install "march[hf] @ git+https://github.com/lizixi-0x2F/March"
 
-# 本地开发
+# local development
 git clone https://github.com/lizixi-0x2F/March && cd March
 uv pip install -e ".[hf]"
 ```
 
-需要：`gcc`，Python ≥ 3.10。HF 集成额外需要 `transformers ≥ 4.40` 和 `torch`。
+Requires: `gcc`, Python ≥ 3.10. HF integration additionally requires `transformers ≥ 4.40` and `torch`.
 
 ---
 
