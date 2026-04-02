@@ -22,107 +22,19 @@ March is a **memory-efficient** KV Cache management system based on Trie structu
 
 - **Memory Savings**: 80-97% reduction in scenarios with prefix overlap
 - **Zero-Copy Access**: Query returns direct memory pointers without data copying
-- **Predictable Memory**: Fixed-size page pool with O(L) complexity
-- **Trade-off**: Slightly slower than dict O(1) lookup, but memory savings justify it
+- **Predictable Memory**: Fixed-size page pool with O(L) lookup where each step is O(1) hash
 
 ## Core Features
 
 - **Prefix Sharing**: Automatically merges identical prefixes using Trie tree, storing each prefix only once
 - **Zero-Copy Query**: Returns memory pointers directly without data copying
-- **O(L) Complexity**: Both insertion and query are O(L) where L is sequence length
+- **O(L) Complexity**: Both insertion and query are O(L) where L is sequence length; each hop is O(1) via internal hashmap
 - **Memory Pool Management**: Fixed-size page allocation with predictable memory usage
 - **C Implementation**: High-performance core with Python-friendly ctypes interface
 
-**Key Insight**: March trades slightly slower query speed (O(L) vs O(1)) for massive memory savings (80-97%) in prefix-heavy workloads.
+**Key Insight**: March trades query traversal time (O(L), one O(1) hash per token) for massive memory savings (80-97%) in prefix-heavy workloads.
 
 ## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Caller Layer                                 │
-│                                                                     │
-│   Python (ctypes)  ──────────────────  C / C++ Framework           │
-│   MarchCache class         |           direct function calls        │
-│   demo_basic.py            |           (embedded inference engine)  │
-│   demo_smollm2.py          |                                        │
-└───────────────────────────────────────────────────────┬────────────┘
-                                                        │
-                                    token_ids[], kv_data, capacity
-                                                        │ ctypes / FFI
-                                                        ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      march.h  ─  Public API                         │
-│                                                                     │
-│   march_create(page_size, max_pages) → MarchCtx*                    │
-│   march_insert(ctx, token_ids, n, kv_data, kv_len) → int           │
-│   march_query (ctx, token_ids, n, out_ptrs, out_page_ids,           │
-│                capacity, matched_tokens) → uint32_t                 │
-│   march_destroy(ctx)                                                │
-│   march_stats(ctx)                                                  │
-│                                                                     │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │                  MarchCtx  (march.c)                        │   │
-│   │    pa ──────────────────────────────────────────────────┐   │   │
-│   │    trie ────────────────────────────────────────────┐   │   │   │
-│   └─────────────────────────────────────────────────────┼───┼───┘   │
-└─────────────────────────────────────────────────────────┼───┼───────┘
-                                                          │   │
-                            ┌─────────────────────────────┘   │
-                            │                                  │
-                            ▼                                  ▼
-┌───────────────────────────────────────┐    ┌────────────────────────────────────────┐
-│         kv_trie.c  ─  KVTrie          │    │   page_allocator.c  ─  PageAllocator   │
-│                                       │    │                                        │
-│  KVTrie                               │    │  PageAllocator                         │
-│  ├── root: TrieNode*                  │    │  ├── pool: void*  (mmap contiguous)     │
-│  ├── pa:   PageAllocator* (borrowed)  │◄───┤  ├── page_size: size_t                 │
-│  └── node_count: uint64               │    │  ├── total_pages: uint32               │
-│                                       │    │  ├── free_count:  uint32               │
-│  TrieNode                             │    │  ├── pages[]:  KVPage descriptors       │
-│  ├── token_id: uint32                 │    │  └── free_list[]: uint32 (id stack)     │
-│  ├── page:  KVPage* (or NULL)         │    │                                        │
-│  └── children: TrieMap               │    │  KVPage                                │
-│                                       │    │  ├── data:       void*  → pool slot    │
-│  TrieMap  (open-addressing hashmap)   │    │  ├── seq_hash:   uint64                │
-│  ├── buckets: TrieMapEntry[]          │    │  ├── ref_count:  uint32                │
-│  ├── cap:    uint32                   │    │  ├── page_id:    uint32                │
-│  └── size:   uint32                   │    │  ├── last_used:  uint64  (LRU clock)   │
-│                                       │    │  └── state:      PAGE_FREE/ACTIVE      │
-│  Key operations:                      │    │                                        │
-│  trie_insert(token_ids, kv_data)      │    │  Key operations:                       │
-│  trie_lookup(token_ids)               │    │  pa_create / pa_destroy  (mmap/munmap) │
-│  trie_collect_path(token_ids)         │    │  pa_alloc()   → KVPage*  (free stack)  │
-│  trie_stats()                         │    │  pa_free()    decrement ref_count       │
-└───────────────────┬───────────────────┘    │  pa_ref()     increment ref_count       │
-                    │                        │  pa_stats()                             │
-                    │ trie_collect_path       └────────────────────────────────────────┘
-                    │ returns KVPage*[]
-                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                view_builder.c  ─  ViewBuilder                       │
-│                                                                     │
-│  KVView                                                             │
-│  ├── pages[]:         KVPage** (pointer array, root-to-leaf order)  │
-│  ├── count:           uint32   (number of matched pages)            │
-│  └── matched_tokens:  uint32   (actual matched token count)         │
-│                                                                     │
-│  view_build(trie, token_ids, n)                                     │
-│    └─► calls trie_collect_path → fills pages[]                      │
-│        returns KVView* (zero-copy: pages point into pool directly)  │
-│                                                                     │
-│  view_free(view)   frees pointer array only; pool pages untouched   │
-└──────────────────────────────────┬──────────────────────────────────┘
-                                   │
-                    out_ptrs[]  (zero-copy pointers into mmap pool)
-                    out_page_ids[]
-                                   │
-                                   ▼
-                        ┌──────────────────┐
-                        │  Inference Engine │
-                        │  (reads KV data  │
-                        │   without memcpy)│
-                        └──────────────────┘
-```
 
 **Data flow — Insert:**
 ```
